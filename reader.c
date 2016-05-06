@@ -18,6 +18,7 @@
 struct common_state {
     int fd;
     size_t block_size;
+    ssize_t file_len;
     size_t md_len;
     uint8_t *buf;
     size_t pos;
@@ -25,7 +26,7 @@ struct common_state {
 };
 
 void common_start(struct common_state *state, int fd, size_t block_size,
-        size_t md_len);
+        size_t seek_offset, size_t md_len);
 void common_finish(struct common_state *state);
 
 void die(int errnum, const char *fmt, ...)
@@ -67,12 +68,22 @@ die(int errnum, const char *fmt, ...)
 
 void
 common_start(struct common_state *state, int fd, size_t block_size,
-        size_t md_len)
+        size_t seek_offset, size_t md_len)
 {
     state->fd = fd;
     state->block_size = block_size;
     state->pos = 0;
     state->md_len = md_len;
+
+    state->file_len = lseek(state->fd, 0, SEEK_END);
+    if (state->file_len == -1) {
+        die(errno, "Failed to seek to end of the file.");
+    }
+
+    if (lseek(fd, seek_offset, SEEK_SET) == -1) {
+        die(errno, "Failed to seek %zd byte(s) into the file.", seek_offset);
+    }
+
 
     if (MD5_Init(&state->ctx) == 0) {
         die(-1, "Unable to initialize MD5 context");
@@ -130,15 +141,13 @@ int
 do_mmap_read(struct common_state *state)
 {
     void *buf;
-    size_t file_len;
     size_t left;
     size_t count = state->block_size;
     uint8_t hash[EVP_MAX_MD_SIZE];
 
-    file_len = lseek(state->fd, 0, SEEK_END);
-    left = file_len;
+    left = state->file_len;
 
-    buf = mmap(NULL, file_len, PROT_READ, MAP_PRIVATE, state->fd, 0);
+    buf = mmap(NULL, state->file_len, PROT_READ, MAP_PRIVATE, state->fd, 0);
     if (buf == MAP_FAILED) {
         die(errno, "Unable to mmap() file");
     }
@@ -157,7 +166,7 @@ do_mmap_read(struct common_state *state)
             count = left;
     }
 
-    munmap(buf, file_len);
+    munmap(buf, state->file_len);
     return 0;
 }
 
@@ -181,7 +190,7 @@ main(int argc, char * const argv[])
     int opt;
     enum read_mode mode = NORMAL_READ;
     size_t block_size = 4096;
-    ssize_t seek_offset = -1;
+    ssize_t seek_offset = 0;
     const char *filename = NULL;
     struct common_state state;
 
@@ -238,9 +247,7 @@ main(int argc, char * const argv[])
         printf("O_DIRECT ");
     printf("\n");
 
-    if (seek_offset != -1) {
-        printf("Seek offset into file %zd byte(s).\n", seek_offset);
-    }
+    printf("Seek offset into file %zd byte(s).\n", seek_offset);
 
     printf("Reads will happen in a block size of %zu byte(s).\n", block_size);
 
@@ -249,11 +256,7 @@ main(int argc, char * const argv[])
         die(errno, "Unable to open '%s'", argv[1]);
     }
 
-    if (seek_offset != -1 && lseek(fd, seek_offset, SEEK_CUR) == -1) {
-        die(errno, "Failed to seek %zd byte(s) into the file.", seek_offset);
-    }
-
-    common_start(&state, fd, block_size, MD5_DIGEST_LENGTH);
+    common_start(&state, fd, block_size, seek_offset, MD5_DIGEST_LENGTH);
 
     switch (mode) {
         case NORMAL_READ:
