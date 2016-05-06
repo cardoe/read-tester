@@ -41,12 +41,12 @@ usage(void) {
     printf(
 "usage: reader [-n | -v | -d | -m] [-b SIZE] [-s SIZE] FILENAME\n"
 "\n"
-"\t-n\t\tuse read() calls\n"
-"\t-v\t\tuse readv() calls\n"
-"\t-d\t\tuse read() calls but open the file with O_DIRECT\n"
-"\t-m\t\tuse mmap() and read chunks from the mapped region\n"
-"\t-b SIZE\tread in SIZE chunks\n"
-"\t-s SIZE\tseek SIZE into the file before reading\n"
+"  -n         use read() calls\n"
+"  -v         use readv() calls\n"
+"  -d         use read() calls but open the file with O_DIRECT\n"
+"  -m         use mmap() and read chunks from the mapped region\n"
+"  -b SIZE    read in SIZE chunks\n"
+"  -s SIZE    seek SIZE into the file before reading\n"
 );
     exit(EXIT_FAILURE);
 }
