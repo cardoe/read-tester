@@ -11,14 +11,28 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <openssl/evp.h>
 #include <openssl/md5.h>
+
+struct common_state {
+    int fd;
+    size_t block_size;
+    size_t md_len;
+    uint8_t *buf;
+    size_t pos;
+    MD5_CTX ctx;
+};
+
+void common_start(struct common_state *state, int fd, size_t block_size,
+        size_t md_len);
+void common_finish(struct common_state *state);
 
 void die(int errnum, const char *fmt, ...)
     __attribute__ ((noreturn));
 
-int do_normal_read(int fd, size_t block_size);
-int do_iovec_read(int fd, size_t block_size);
-int do_mmap_read(int fd, size_t block_size);
+int do_normal_read(struct common_state *state);
+int do_iovec_read(struct common_state *state);
+int do_mmap_read(struct common_state *state);
 
 void
 print_hash(uint8_t *buf, size_t len)
@@ -50,58 +64,75 @@ die(int errnum, const char *fmt, ...)
     exit(EXIT_FAILURE);
 }
 
-int
-do_normal_read(int fd, size_t block_size)
+void
+common_start(struct common_state *state, int fd, size_t block_size,
+        size_t md_len)
 {
-    uint8_t *buf = NULL;
-    size_t pos = 0;
-    MD5_CTX ctx;
-    uint8_t hash[MD5_DIGEST_LENGTH];
-    ssize_t count;
+    state->fd = fd;
+    state->block_size = block_size;
+    state->pos = 0;
+    state->md_len = md_len;
 
-    if (MD5_Init(&ctx) == 0) {
+    if (MD5_Init(&state->ctx) == 0) {
         die(-1, "Unable to initialize MD5 context");
     }
 
-    buf = malloc(block_size);
-    if (buf == NULL) {
-        die(errno, "Unable to allocate %zu byte(s).", block_size);
+    state->buf = malloc(state->block_size);
+    if (state->buf == NULL) {
+        die(errno, "Unable to allocate %zu byte(s).", state->block_size);
     }
+
+}
+
+void
+common_finish(struct common_state *state)
+{
+    uint8_t hash[EVP_MAX_MD_SIZE];
+
+    close(state->fd);
+    free(state->buf);
+
+    MD5_Final(hash, &state->ctx);
+
+    printf("%8s:%08zu:", "final", state->pos);
+    print_hash(hash, state->md_len);
+    printf("\n");
+}
+
+int
+do_normal_read(struct common_state *state)
+{
+    ssize_t count;
+    uint8_t hash[EVP_MAX_MD_SIZE];
 
     // read to the end
     do {
         // perform the actual read
-        count = read(fd, buf, block_size);
+        count = read(state->fd, state->buf, state->block_size);
         if (count == -1) {
             die(errno, "Unable to read from file");
         }
 
-        MD5(buf, count, hash);
-        MD5_Update(&ctx, buf, count);
-        printf("%08zu:%08zu:", pos, count);
-        print_hash(hash, MD5_DIGEST_LENGTH);
+        MD5(state->buf, count, hash);
+        MD5_Update(&state->ctx, state->buf, count);
+        printf("%08zu:%08zu:", state->pos, count);
+        print_hash(hash, state->md_len);
         printf("\n");
 
-        pos += count;
+        state->pos += count;
     } while (count != 0);
-
-    MD5_Final(hash, &ctx);
-
-    printf("%8s:%08zu:", "final", pos);
-    print_hash(hash, MD5_DIGEST_LENGTH);
-    printf("\n");
 
     return 0;
 }
 
 int
-do_iovec_read(int fd, size_t block_size)
+do_iovec_read(struct common_state *state)
 {
     return -1;
 }
 
 int
-do_mmap_read(int fd, size_t block_size)
+do_mmap_read(struct common_state *state)
 {
     return -1;
 }
@@ -122,6 +153,7 @@ main(int argc, char * const argv[])
     size_t block_size = 4096;
     ssize_t seek_offset = -1;
     const char *filename = NULL;
+    struct common_state state;
 
     while ((opt = getopt(argc, argv, "nvdmb:s:")) != -1) {
         switch (opt) {
@@ -191,19 +223,21 @@ main(int argc, char * const argv[])
         die(errno, "Failed to seek %zd byte(s) into the file.", seek_offset);
     }
 
+    common_start(&state, fd, block_size, MD5_DIGEST_LENGTH);
+
     switch (mode) {
         case NORMAL_READ:
-            do_normal_read(fd, block_size);
+            do_normal_read(&state);
             break;
         case IOVEC_READ:
-            do_iovec_read(fd, block_size);
+            do_iovec_read(&state);
             break;
         case MMAP_READ:
-            do_mmap_read(fd, block_size);
+            do_mmap_read(&state);
             break;
     }
 
-    close(fd);
+    common_finish(&state);
 
     return EXIT_SUCCESS;
 }
