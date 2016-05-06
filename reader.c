@@ -37,6 +37,21 @@ int do_iovec_read(struct common_state *state);
 int do_mmap_read(struct common_state *state);
 
 void
+usage(void) {
+    printf(
+"usage: reader [-n | -v | -d | -m] [-b SIZE] [-s SIZE] FILENAME\n"
+"\n"
+"\t-n\t\tuse read() calls\n"
+"\t-v\t\tuse readv() calls\n"
+"\t-d\t\tuse read() calls but open the file with O_DIRECT\n"
+"\t-m\t\tuse mmap() and read chunks from the mapped region\n"
+"\t-b SIZE\tread in SIZE chunks\n"
+"\t-s SIZE\tseek SIZE into the file before reading\n"
+);
+    exit(EXIT_FAILURE);
+}
+
+void
 print_hash(uint8_t *buf, size_t len)
 {
     for (size_t x = 0; x < len; x++) {
@@ -216,14 +231,15 @@ main(int argc, char * const argv[])
                 seek_offset = atoi(optarg);
                 break;
             default: // '?'
-                printf("usage here");
-                //usage();
+                usage();
                 exit(EXIT_FAILURE);
         }
     }
 
     if (optind >= argc) {
-        die(-1, "Expected filename after options");
+        fprintf(stderr, "Expected filename after options\n\n");
+        usage();
+        exit(EXIT_FAILURE);
     }
 
     // the file we'll be working with
