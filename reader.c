@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 
 #include <sys/types.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -126,13 +127,42 @@ do_normal_read(struct common_state *state)
 }
 
 int
-do_iovec_read(struct common_state *state)
+do_mmap_read(struct common_state *state)
 {
-    return -1;
+    void *buf;
+    size_t file_len;
+    size_t left;
+    size_t count = state->block_size;
+    uint8_t hash[EVP_MAX_MD_SIZE];
+
+    file_len = lseek(state->fd, 0, SEEK_END);
+    left = file_len;
+
+    buf = mmap(NULL, file_len, PROT_READ, MAP_PRIVATE, state->fd, 0);
+    if (buf == MAP_FAILED) {
+        die(errno, "Unable to mmap() file");
+    }
+
+    // read through all the data in block size chunks
+    while (left > 0) {
+        MD5(buf + state->pos, count, hash);
+        MD5_Update(&state->ctx, buf + state->pos, count);
+        printf("%08zu:%08zu:", state->pos, count);
+        print_hash(hash, state->md_len);
+        printf("\n");
+
+        state->pos += count;
+        left -= count;
+        if (left < count)
+            count = left;
+    }
+
+    munmap(buf, file_len);
+    return 0;
 }
 
 int
-do_mmap_read(struct common_state *state)
+do_iovec_read(struct common_state *state)
 {
     return -1;
 }
